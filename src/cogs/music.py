@@ -249,7 +249,11 @@ class MusicCog(commands.Cog):
             await state.next_event.wait()
             state.current = None
 
-    async def start_alarm_sound(self, guild: discord.Guild) -> bool:
+    async def start_alarm_sound(
+        self,
+        guild: discord.Guild,
+        preferred_channel_id: int | None = None,
+    ) -> bool:
         state = self.get_state(guild.id)
         state.alarm_active = True
 
@@ -257,15 +261,20 @@ class MusicCog(commands.Cog):
         if not voice or not voice.is_connected():
             snapshot = await self.bot.store.snapshot()
             stay_channel_id = snapshot.get("stay_channels", {}).get(str(guild.id))
-            channel = guild.get_channel(int(stay_channel_id)) if stay_channel_id else None
+            channel_id = preferred_channel_id
+            if channel_id is None and stay_channel_id:
+                channel_id = int(stay_channel_id)
+            channel = guild.get_channel(int(channel_id)) if channel_id else None
             if isinstance(channel, discord.VoiceChannel):
                 voice = await self.connect_to_channel(channel)
 
         if not voice or not voice.is_connected():
+            state.alarm_active = False
             return False
 
         if voice.is_playing() or voice.is_paused():
             voice.stop()
+            await asyncio.sleep(0.35)
 
         source = discord.FFmpegPCMAudio(
             str(self.alarm_sound_path),
@@ -484,6 +493,23 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message("Da tat bao thuc.")
         else:
             await interaction.response.send_message("Khong co bao thuc nao dang keu.", ephemeral=True)
+
+    @app_commands.command(name="testalarm", description="Phat thu am bao thuc trong voice room hien tai.")
+    async def testalarm(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message("Lenh nay chi dung duoc trong server.", ephemeral=True)
+            return
+
+        channel = interaction.user.voice.channel if interaction.user.voice else None
+        channel_id = channel.id if isinstance(channel, discord.VoiceChannel) else None
+        started = await self.start_alarm_sound(interaction.guild, channel_id)
+        if started:
+            await interaction.response.send_message("Dang phat thu am bao. Dung /stopalarm de tat.")
+        else:
+            await interaction.response.send_message(
+                "Bot chua vao duoc voice room. Hay vao voice room roi dung lai /testalarm.",
+                ephemeral=True,
+            )
 
 
 async def setup(bot: VoiceAlarmBot) -> None:

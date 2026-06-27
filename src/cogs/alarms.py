@@ -62,7 +62,11 @@ class AlarmCog(commands.Cog):
             alarm_voice_started = False
             music_cog = self.bot.get_cog("MusicCog")
             if guild and music_cog and hasattr(music_cog, "start_alarm_sound"):
-                alarm_voice_started = await music_cog.start_alarm_sound(guild)
+                voice_channel_id = alarm.get("voice_channel_id")
+                alarm_voice_started = await music_cog.start_alarm_sound(
+                    guild,
+                    int(voice_channel_id) if voice_channel_id else None,
+                )
 
             message = (
                 f"<@{alarm['user_id']}> Báo thức `{alarm['time']}` giờ Việt Nam: "
@@ -101,10 +105,17 @@ class AlarmCog(commands.Cog):
             return
 
         now = datetime.now(VIETNAM_TZ)
+        voice_channel_id = None
+        if isinstance(interaction.user, discord.Member) and interaction.user.voice:
+            voice_channel = interaction.user.voice.channel
+            if isinstance(voice_channel, discord.VoiceChannel):
+                voice_channel_id = voice_channel.id
+
         alarm = {
             "id": uuid.uuid4().hex[:8],
             "guild_id": interaction.guild.id,
             "channel_id": interaction.channel_id,
+            "voice_channel_id": voice_channel_id,
             "user_id": interaction.user.id,
             "time": time,
             "message": message[:1800],
