@@ -22,7 +22,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    load_dotenv(ROOT_DIR / ".env")
+    load_dotenv(ROOT_DIR / ".env", encoding="utf-8-sig")
 
     token = os.getenv("DISCORD_TOKEN", "").strip()
     dev_guild_raw = os.getenv("DEV_GUILD_ID", "").strip()
