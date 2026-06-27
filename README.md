@@ -12,6 +12,8 @@ Bot Discord Python dùng `discord.py` v2 slash commands, phát nhạc bằng `yt
 - `/join247`: đặt kênh voice hiện tại làm stay channel 24/7.
 - `/leave247`: tắt chế độ treo room cho server.
 - `/setalarm HH:MM nội_dung`: đặt báo thức theo múi giờ Việt Nam.
+- Khi báo thức tới giờ, bot dừng nhạc đang phát và phát âm báo kiểu Messenger trong voice room.
+- `/stopalarm`: bất kỳ ai cũng có thể tắt âm báo đang kêu.
 - `/alarms`: xem báo thức của bạn.
 - `/cancelalarm alarm_id`: xóa báo thức.
 

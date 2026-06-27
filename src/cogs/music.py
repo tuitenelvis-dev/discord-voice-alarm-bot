@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import wave
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import discord
@@ -56,6 +59,7 @@ class GuildMusicState:
         self.current: Track | None = None
         self.audio_task: asyncio.Task[None] | None = None
         self.next_event = asyncio.Event()
+        self.alarm_active = False
         self.lock = asyncio.Lock()
 
 
@@ -64,7 +68,53 @@ class MusicCog(commands.Cog):
         self.bot = bot
         self.states: dict[int, GuildMusicState] = {}
         self.ytdlp = yt_dlp.YoutubeDL(YTDLP_OPTIONS)
+        self.alarm_sound_path = Path(__file__).resolve().parents[2] / "data" / "alarm_messenger_style.wav"
+        self.ensure_alarm_sound()
         self.ensure_stay_channels.start()
+
+    def ensure_alarm_sound(self) -> None:
+        if self.alarm_sound_path.exists():
+            return
+
+        self.alarm_sound_path.parent.mkdir(parents=True, exist_ok=True)
+        sample_rate = 44_100
+        total_frames = int(sample_rate * 7.5)
+        pattern = (
+            (880, 0.18),
+            (1175, 0.18),
+            (0, 0.12),
+            (880, 0.18),
+            (1175, 0.18),
+            (0, 0.45),
+        )
+        pattern_samples = [(frequency, int(length * sample_rate)) for frequency, length in pattern]
+        pattern_total = sum(length for _, length in pattern_samples)
+        frames = bytearray()
+
+        for index in range(total_frames):
+            cursor = index % pattern_total
+            frequency = 0
+            offset = 0
+            for candidate_frequency, length in pattern_samples:
+                if cursor < offset + length:
+                    frequency = candidate_frequency
+                    cursor -= offset
+                    break
+                offset += length
+
+            if frequency == 0:
+                sample = 0
+            else:
+                envelope = min(1.0, cursor / (sample_rate * 0.025))
+                value = math.sin(2 * math.pi * frequency * index / sample_rate)
+                sample = int(0.42 * envelope * value * 32767)
+            frames.extend(sample.to_bytes(2, "little", signed=True))
+
+        with wave.open(str(self.alarm_sound_path), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(bytes(frames))
 
     def cog_unload(self) -> None:
         self.ensure_stay_channels.cancel()
@@ -136,6 +186,10 @@ class MusicCog(commands.Cog):
         while True:
             state.next_event.clear()
             track = await state.queue.get()
+            if state.alarm_active:
+                await state.queue.put(track)
+                await asyncio.sleep(1)
+                continue
             state.current = track
 
             voice = guild.voice_client
@@ -157,6 +211,45 @@ class MusicCog(commands.Cog):
             voice.play(source, after=after_play)
             await state.next_event.wait()
             state.current = None
+
+    async def start_alarm_sound(self, guild: discord.Guild) -> bool:
+        state = self.get_state(guild.id)
+        state.alarm_active = True
+
+        voice = guild.voice_client
+        if not voice or not voice.is_connected():
+            snapshot = await self.bot.store.snapshot()
+            stay_channel_id = snapshot.get("stay_channels", {}).get(str(guild.id))
+            channel = guild.get_channel(int(stay_channel_id)) if stay_channel_id else None
+            if isinstance(channel, discord.VoiceChannel):
+                voice = await self.connect_to_channel(channel)
+
+        if not voice or not voice.is_connected():
+            return False
+
+        if voice.is_playing() or voice.is_paused():
+            voice.stop()
+
+        source = discord.FFmpegPCMAudio(
+            str(self.alarm_sound_path),
+            executable=self.bot.settings.ffmpeg_path,
+            before_options="-stream_loop -1",
+            options="-vn",
+        )
+        voice.play(source)
+        return True
+
+    async def stop_alarm_sound(self, guild: discord.Guild) -> bool:
+        state = self.get_state(guild.id)
+        was_active = state.alarm_active
+        state.alarm_active = False
+
+        voice = guild.voice_client
+        if voice and (voice.is_playing() or voice.is_paused()):
+            voice.stop()
+
+        await self.start_audio_task(guild)
+        return was_active
 
     @tasks.loop(minutes=1)
     async def ensure_stay_channels(self) -> None:
@@ -333,6 +426,18 @@ class MusicCog(commands.Cog):
             voice.stop()
 
         await interaction.response.send_message("Đã stop nhạc và xóa queue. Bot vẫn ở voice room.")
+
+    @app_commands.command(name="stopalarm", description="Tat am bao thuc dang keu trong voice room.")
+    async def stopalarm(self, interaction: discord.Interaction) -> None:
+        if not interaction.guild:
+            await interaction.response.send_message("Lenh nay chi dung duoc trong server.", ephemeral=True)
+            return
+
+        stopped = await self.stop_alarm_sound(interaction.guild)
+        if stopped:
+            await interaction.response.send_message("Da tat bao thuc.")
+        else:
+            await interaction.response.send_message("Khong co bao thuc nao dang keu.", ephemeral=True)
 
 
 async def setup(bot: VoiceAlarmBot) -> None:

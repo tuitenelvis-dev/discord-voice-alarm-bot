@@ -8,6 +8,7 @@ env/
 
 .env
 data/*.json
+data/alarm_messenger_style.wav
 !data/.gitkeep
 
 .pytest_cache/

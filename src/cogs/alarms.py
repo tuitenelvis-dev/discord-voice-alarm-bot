@@ -58,9 +58,16 @@ class AlarmCog(commands.Cog):
                 fired_ids.add(alarm["id"])
                 continue
 
+            guild = self.bot.get_guild(int(alarm["guild_id"]))
+            alarm_voice_started = False
+            music_cog = self.bot.get_cog("MusicCog")
+            if guild and music_cog and hasattr(music_cog, "start_alarm_sound"):
+                alarm_voice_started = await music_cog.start_alarm_sound(guild)
+
             message = (
                 f"<@{alarm['user_id']}> Báo thức `{alarm['time']}` giờ Việt Nam: "
-                f"**{alarm['message']}**"
+                f"**{alarm['message']}**\n"
+                f"{'Đang phát âm báo trong voice. Dùng `/stopalarm` để tắt.' if alarm_voice_started else 'Bot chưa ở voice/stay channel nên chỉ nhắc bằng tin nhắn.'}"
             )
             try:
                 await channel.send(message)
