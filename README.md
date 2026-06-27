@@ -52,6 +52,21 @@ python -m src.bot
 
 Hoặc double-click `run_bot.bat`.
 
+## Deploy Railway
+
+1. Push repo lên GitHub.
+2. Railway -> New Project -> Deploy from GitHub Repo.
+3. Chọn repo `discord-voice-alarm-bot`.
+4. Vào Variables và thêm:
+
+```env
+DISCORD_TOKEN=your_token_here
+DEV_GUILD_ID=your_server_id_optional
+FFMPEG_PATH=ffmpeg
+```
+
+5. Deploy. `Procfile` và `nixpacks.toml` đã cấu hình start command và FFmpeg cho Railway.
+
 ## Lưu ý Spotify
 
 Phiên bản miễn phí này dùng `yt-dlp` + FFmpeg, nên YouTube/direct URL là ổn định nhất. Spotify URL được xử lý theo kiểu best-effort: bot thử đọc metadata rồi tìm bài tương ứng trên YouTube. Nếu muốn Spotify playlist/album đầy đủ và ổn định hơn, nên nâng cấp sang Lavalink + plugin Spotify.
