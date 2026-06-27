@@ -24,9 +24,10 @@ YTDLP_OPTIONS = {
     "quiet": True,
     "default_search": "ytsearch",
     "extract_flat": False,
-    "noplaylist": True,
     "source_address": "0.0.0.0",
 }
+
+MAX_PLAYLIST_TRACKS = 50
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -67,7 +68,6 @@ class MusicCog(commands.Cog):
     def __init__(self, bot: VoiceAlarmBot) -> None:
         self.bot = bot
         self.states: dict[int, GuildMusicState] = {}
-        self.ytdlp = yt_dlp.YoutubeDL(YTDLP_OPTIONS)
         self.alarm_sound_path = Path(__file__).resolve().parents[2] / "data" / "alarm_messenger_style.wav"
         self.ensure_alarm_sound()
         self.ensure_stay_channels.start()
@@ -129,9 +129,18 @@ class MusicCog(commands.Cog):
             self.states[guild_id] = state
         return state
 
-    async def extract_track(self, query: str, requester_id: int) -> Track:
+    async def extract_tracks(self, query: str, requester_id: int) -> list[Track]:
         query = query.strip()
         search_query = query
+        wants_playlist = any(
+            marker in query
+            for marker in (
+                "list=",
+                "/playlist",
+                "open.spotify.com/playlist",
+                "open.spotify.com/album",
+            )
+        )
 
         if "open.spotify.com/" in query:
             spotify_info = await asyncio.to_thread(self._extract_info, query, False)
@@ -143,27 +152,55 @@ class MusicCog(commands.Cog):
         elif not query.startswith(("http://", "https://")):
             search_query = f"ytsearch1:{query}"
 
-        info = await asyncio.to_thread(self._extract_info, search_query, False)
+        info = await asyncio.to_thread(self._extract_info, search_query, False, wants_playlist)
         if "entries" in info:
             entries = [entry for entry in info["entries"] if entry]
             if not entries:
                 raise ValueError("Không tìm thấy bài nhạc phù hợp.")
-            info = entries[0]
+            if not wants_playlist:
+                entries = entries[:1]
+            else:
+                entries = entries[:MAX_PLAYLIST_TRACKS]
+        else:
+            entries = [info]
 
-        stream_url = info.get("url")
-        if not stream_url:
+        tracks: list[Track] = []
+        for entry in entries:
+            if entry.get("_type") == "url" or not entry.get("url"):
+                entry_url = entry.get("url") or entry.get("webpage_url")
+                if not entry_url:
+                    continue
+                entry = await asyncio.to_thread(self._extract_info, entry_url, False, False)
+
+            stream_url = entry.get("url")
+            if not stream_url:
+                continue
+
+            tracks.append(
+                Track(
+                    title=entry.get("title") or "Unknown title",
+                    webpage_url=entry.get("webpage_url") or entry.get("original_url") or query,
+                    stream_url=stream_url,
+                    requester_id=requester_id,
+                    duration=entry.get("duration"),
+                )
+            )
+
+        if not tracks:
             raise ValueError("Không lấy được audio stream. Thử link/từ khóa khác.")
 
-        return Track(
-            title=info.get("title") or "Unknown title",
-            webpage_url=info.get("webpage_url") or info.get("original_url") or query,
-            stream_url=stream_url,
-            requester_id=requester_id,
-            duration=info.get("duration"),
-        )
+        return tracks
 
-    def _extract_info(self, query: str, download: bool) -> dict:
-        return self.ytdlp.extract_info(query, download=download)
+    async def extract_track(self, query: str, requester_id: int) -> Track:
+        return (await self.extract_tracks(query, requester_id))[0]
+
+    def _extract_info(self, query: str, download: bool, playlist: bool = False) -> dict:
+        options = dict(YTDLP_OPTIONS)
+        options["noplaylist"] = not playlist
+        if playlist:
+            options["playlistend"] = MAX_PLAYLIST_TRACKS
+        with yt_dlp.YoutubeDL(options) as ytdlp:
+            return ytdlp.extract_info(query, download=download)
 
     async def connect_to_channel(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
         current = channel.guild.voice_client
@@ -316,18 +353,27 @@ class MusicCog(commands.Cog):
 
         try:
             await self.connect_to_channel(voice_channel)
-            track = await self.extract_track(query, interaction.user.id)
+            tracks = await self.extract_tracks(query, interaction.user.id)
         except Exception as exc:
             await interaction.followup.send(f"Không thể phát bài này: `{exc}`")
             return
 
         state = self.get_state(interaction.guild.id)
-        await state.queue.put(track)
+        for track in tracks:
+            await state.queue.put(track)
         await self.start_audio_task(interaction.guild)
 
-        await interaction.followup.send(
-            f"Đã thêm vào queue: **{track.title}** (`{track.duration_text}`)\n{track.webpage_url}"
-        )
+        if len(tracks) == 1:
+            track = tracks[0]
+            await interaction.followup.send(
+                f"Đã thêm vào queue: **{track.title}** (`{track.duration_text}`)\n{track.webpage_url}"
+            )
+        else:
+            preview = "\n".join(f"{index}. {track.title}" for index, track in enumerate(tracks[:5], start=1))
+            more = f"\n... và {len(tracks) - 5} bài nữa" if len(tracks) > 5 else ""
+            await interaction.followup.send(
+                f"Đã thêm **{len(tracks)}** bài vào queue từ playlist.\n{preview}{more}"
+            )
 
     @app_commands.command(name="join247", description="Cho bot treo 24/7 trong voice room hiện tại.")
     async def join247(self, interaction: discord.Interaction) -> None:

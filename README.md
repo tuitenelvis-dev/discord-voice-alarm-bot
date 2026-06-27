@@ -5,6 +5,7 @@ Bot Discord Python dùng `discord.py` v2 slash commands, phát nhạc bằng `yt
 ## Tính năng
 
 - `/play query`: phát nhạc từ YouTube URL, từ khóa tìm kiếm, hoặc direct audio URL.
+- `/play playlist_url`: dán link YouTube playlist để thêm tối đa 50 bài vào queue.
 - `/queue`: xem hàng chờ.
 - `/skip`: bỏ qua bài hiện tại.
 - `/pause` và `/resume`: tạm dừng/phát tiếp.
